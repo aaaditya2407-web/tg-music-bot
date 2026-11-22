@@ -132,11 +132,14 @@ async def end_h(_, update):
         await play_next(update.chat_id)
 
 async def main():
+    print("1. Starting bot...", flush=True)
     await bot.start()
+    print("2. Bot started! Starting PyTgCalls...", flush=True)
     await call_py.start()
-    print("Music Bot is ready!")
+    print("3. Music Bot is ready!", flush=True)
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
             
