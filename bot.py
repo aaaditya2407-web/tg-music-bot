@@ -1,5 +1,4 @@
-import os
-import asyncio
+import os, asyncio
 from collections import defaultdict
 import yt_dlp
 from pyrogram import Client, filters
@@ -15,35 +14,21 @@ STRING_SESSION = os.environ["STRING_SESSION"]
 bot = Client("music_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 assistant = Client("assistant", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
 call_py = PyTgCalls(assistant)
-
 queues = defaultdict(list)
 
-YDL_OPTS = {
-    "format": "bestaudio/best",
-    "noplaylist": True,
-    "quiet": True,
-    "default_search": "ytsearch1",
-    "extract_flat": False,
-}
+YDL_OPTS = {"format": "bestaudio/best", "noplaylist": True, "quiet": True, "default_search": "ytsearch1"}
 
 def get_audio_info(query: str):
     with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
         info = ydl.extract_info(query, download=False)
         if "entries" in info:
             info = info["entries"][0]
-        return {
-            "title": info.get("title", "Unknown Track"),
-            "url": info["url"],
-            "webpage_url": info.get("webpage_url", ""),
-            "duration": info.get("duration", 0),
-        }
+        return {"title": info.get("title", "Unknown Track"), "url": info["url"], "webpage_url": info.get("webpage_url", "")}
 
 async def play_next(chat_id: int):
     if not queues[chat_id]:
-        try:
-            await call_py.leave_call(chat_id)
-        except Exception:
-            pass
+        try: await call_py.leave_call(chat_id)
+        except Exception: pass
         return
     track = queues[chat_id][0]
     try:
@@ -56,21 +41,12 @@ async def play_next(chat_id: int):
 
 @bot.on_message(filters.command(["start", "help"]))
 async def start_handler(_, m: Message):
-    await m.reply_text(
-        "Music Bot is Online!\n\n"
-        "Commands:\n"
-        "/play <song name or link> - Play in Group Voice Chat or get audio in PM\n"
-        "/pause - Pause playback\n"
-        "/resume - Resume playback\n"
-        "/skip - Skip current song\n"
-        "/stop - Stop and leave Voice Chat\n"
-        "/queue - Show current queue"
-    )
+    await m.reply_text("Music Bot Online!\nCommands: /play, /pause, /resume, /skip, /stop, /queue")
 
 @bot.on_message(filters.command("play"))
 async def play_handler(_, m: Message):
     if len(m.command) < 2:
-        return await m.reply_text("Usage: /play <song name or YouTube URL>")
+        return await m.reply_text("Usage: /play <song name or link>")
     query = m.text.split(None, 1)[1]
     status = await m.reply_text(f"Searching: {query}...")
     try:
@@ -79,20 +55,18 @@ async def play_handler(_, m: Message):
         return await status.edit_text(f"Search failed: {e}")
 
     if m.chat.type.name == "PRIVATE":
-        await status.edit_text(f"Found: {track['title']}\nSending audio...")
+        await status.edit_text(f"Downloading: {track['title']}...")
         ydl_dl = {"format": "bestaudio[ext=m4a]/bestaudio", "outtmpl": "/tmp/%(id)s.%(ext)s", "quiet": True, "noplaylist": True}
         def download():
             with yt_dlp.YoutubeDL(ydl_dl) as ydl:
                 info = ydl.extract_info(track["webpage_url"] or query, download=True)
-                if "entries" in info:
-                    info = info["entries"][0]
+                if "entries" in info: info = info["entries"][0]
                 return ydl.prepare_filename(info), info.get("title", "Audio")
         try:
             fpath, title = await asyncio.to_thread(download)
             await m.reply_audio(fpath, title=title)
             await status.delete()
-            if os.path.exists(fpath):
-                os.remove(fpath)
+            if os.path.exists(fpath): os.remove(fpath)
         except Exception as e:
             await status.edit_text(f"Download failed: {e}")
         return
@@ -107,19 +81,13 @@ async def play_handler(_, m: Message):
 
 @bot.on_message(filters.command("pause") & filters.group)
 async def pause_handler(_, m: Message):
-    try:
-        await call_py.pause_stream(m.chat.id)
-        await m.reply_text("Paused.")
-    except Exception as e:
-        await m.reply_text(f"Error: {e}")
+    try: await call_py.pause_stream(m.chat.id); await m.reply_text("Paused.")
+    except Exception as e: await m.reply_text(f"Error: {e}")
 
 @bot.on_message(filters.command("resume") & filters.group)
 async def resume_handler(_, m: Message):
-    try:
-        await call_py.resume_stream(m.chat.id)
-        await m.reply_text("Resumed.")
-    except Exception as e:
-        await m.reply_text(f"Error: {e}")
+    try: await call_py.resume_stream(m.chat.id); await m.reply_text("Resumed.")
+    except Exception as e: await m.reply_text(f"Error: {e}")
 
 @bot.on_message(filters.command("skip") & filters.group)
 async def skip_handler(_, m: Message):
@@ -127,38 +95,29 @@ async def skip_handler(_, m: Message):
         queues[m.chat.id].pop(0)
         await m.reply_text("Skipped.")
         await play_next(m.chat.id)
-    else:
-        await m.reply_text("Queue is empty.")
 
 @bot.on_message(filters.command("stop") & filters.group)
 async def stop_handler(_, m: Message):
     queues[m.chat.id].clear()
-    try:
-        await call_py.leave_call(m.chat.id)
-    except Exception:
-        pass
-    await m.reply_text("Stopped and left Voice Chat.")
+    try: await call_py.leave_call(m.chat.id)
+    except Exception: pass
+    await m.reply_text("Stopped.")
 
 @bot.on_message(filters.command("queue") & filters.group)
 async def queue_handler(_, m: Message):
     q = queues[m.chat.id]
-    if not q:
-        return await m.reply_text("Queue is empty.")
-    text = "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(q))
-    await m.reply_text(f"Current Queue:\n{text}")
+    await m.reply_text("Queue:\n" + "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(q)) if q else "Queue is empty.")
 
 @call_py.on_update()
 async def stream_end_handler(_, update):
     if type(update).__name__ == "StreamAudioEnded":
-        chat_id = update.chat_id
-        if queues[chat_id]:
-            queues[chat_id].pop(0)
-        await play_next(chat_id)
+        if queues[update.chat_id]: queues[update.chat_id].pop(0)
+        await play_next(update.chat_id)
 
 async def main():
     await bot.start()
     await call_py.start()
-    print("Music Bot is ready and running!")
+    print("Music Bot is ready!")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
