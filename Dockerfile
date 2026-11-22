@@ -1,14 +1,20 @@
-# Dockerfile for tg-music-bot
-FROM python:3.11-slim
+FROM python:3.12-slim AS builder
 
-# Install ffmpeg
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# Install runtime dependencies (ffmpeg) and build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    gcc \
+    libc-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
 COPY . .
 
-ENV PYTHONUNBUFFERED=1
-
+# Default command
 CMD ["python", "bot.py"]
