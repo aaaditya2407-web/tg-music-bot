@@ -1,5 +1,5 @@
-python-telegram-bot==20.7
-yt-dlp==2024.3.10
+pyrogram==2.0.106
 pytgcalls==3.0.0
-PyNaCl==1.5.0
+yt-dlp==2024.04.09
 ffmpeg-python==0.2.0
+python-dotenv==1.0.0
