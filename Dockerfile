@@ -1,20 +1,25 @@
 FROM python:3.12-slim AS builder
 
-# Install runtime dependencies (ffmpeg) and build tools
+# Install build deps (ffmpeg & git)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    gcc \
-    libc-dev \
-    && rm -rf /var/lib/apt/lists/*
+        ffmpeg \
+        git && \
+    rm -rf /var/lib/apt/lists/*
 
+# Create non‑root user
+RUN useradd -m botuser
 WORKDIR /app
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy requirement file & install
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -U pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy source code
 COPY . .
 
-# Default command
+# Switch to non‑root user
+USER botuser
+
+# Runtime command
 CMD ["python", "bot.py"]
