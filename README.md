@@ -1,46 +1,28 @@
-# Telegram Music Bot
+# Telegram Group Voice‑Chat Music Bot
 
-A lightweight Telegram music streaming bot that plays audio from YouTube in group voice chats.
+A lightweight music streaming bot for Telegram groups built with **Pyrogram**, **PyTgCalls (v2)**, **yt‑dlp**, and **FFmpeg**. It runs inside Docker and can be deployed to Railway (or any container platform).
 
 ## Features
-- `/play <query|url>` – search YouTube or play a direct link
-- Queue management (`/queue`, `/skip`, `/clear`)
-- Pause / resume (`/pause`, `/resume`)
-- `/stop` – leaves voice chat and clears queue
-- Admin‑only controls (toggle in `bot.py`)
-- Dockerized, ready for Railway / Render / any VPS
+- `/play <query|url>` – search YouTube or use a direct link.
+- Inline control buttons: Pause, Resume, Skip, Stop.
+- `/queue` – view current playlist.
+- Automatic thumbnail & link cards.
+- Works with Python 3.12.
 
-## Prerequisites
-- Telegram Bot token from **@BotFather**
-- A group where the bot is added as an admin with *Can manage voice chats*
-- Docker (if you run locally)
+## Environment variables
+| Variable | Description |
+|----------|-------------|
+| `API_ID` | Telegram API ID |
+| `API_HASH` | Telegram API hash |
+| `BOT_TOKEN` | Bot token from BotFather |
+| `STRING_SESSION` | Optional user session string (required for voice‑chat control) |
 
-## Deployment on Railway (one‑click)
-1. Create a new project → **Deploy from GitHub** → paste the repo URL.
-2. Add an environment variable `BOT_TOKEN` with your Bot token.
-3. Click **Deploy** – Railway reads `railway.toml`, builds the Docker image and starts the bot.
-4. Open the **Logs** tab to confirm the bot started.
-
-## Local Docker Run
-```bash
-# clone repo
-git clone https://github.com/yourusername/tg-music-bot.git
-cd tg-music-bot
-# build image
-docker build -t tg-music-bot .
-# run container (replace TOKEN with your bot token)
-docker run -e BOT_TOKEN=YOUR_BOT_TOKEN tg-music-bot
-```
-
-## Usage (in a group voice chat)
-1. Start a voice chat in the group.
-2. Send `/play never gonna give you up` (or any YouTube URL).
-3. Use `/skip`, `/pause`, `/resume`, `/queue`, `/stop` as needed.
-
-## Credits
-- `python-telegram-bot` – Telegram Bot API wrapper
-- `yt-dlp` – YouTube audio extraction
-- `pytgcalls` – Telegram voice chat client
+## Deploy to Railway (quick)
+1. Create a Railway project → **Deploy from Repo**.
+2. Use the repo URL: `https://github.com/aaaditya2407-web/tg-music-bot`.
+3. Add the four environment variables under **Settings → Variables**.
+4. Click **Deploy** – Railway will build the Docker image and start the bot.
+5. Add the bot to a group, give it *Admin → Manage Voice Chats* rights, and use `/play`.
 
 ---
-*This bot is MIT licensed. Feel free to fork and improve!*
+*This repo is public – feel free to fork, modify, or open issues.*
