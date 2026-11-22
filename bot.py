@@ -19,6 +19,8 @@ assistant = Client("assistant", api_id=API_ID, api_hash=API_HASH, session_string
 call_py = PyTgCalls(assistant)
 queues = defaultdict(list)
 
+CHAT_FILTER = filters.group | filters.channel
+
 async def get_audio_info(query: str):
     if not query.startswith("http"):
         q = urllib.parse.quote(query)
@@ -43,7 +45,6 @@ async def get_audio_info(query: str):
                 except Exception:
                     continue
 
-    # Fallback to SoundCloud / Direct URL via yt-dlp
     src = query if query.startswith("http") else f"scsearch1:{query}"
     ydl_opts = {"format": "bestaudio/best", "noplaylist": True, "quiet": True}
     def extract():
@@ -97,7 +98,7 @@ async def play_handler(_, m: Message):
             else:
                 ydl_dl = {"format": "bestaudio/best", "outtmpl": fpath, "quiet": True}
                 await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_dl).download([track["url"]]))
-            await m.reply_audio(fpath, title=track["title"])
+            await m.reply_audio(fpath, title=title := track["title"])
             await status.delete()
         except Exception as e:
             await status.edit_text(f"Download failed: {e}")
@@ -113,7 +114,7 @@ async def play_handler(_, m: Message):
     else:
         await status.edit_text(f"Queued (#{len(queues[m.chat.id])}): {track['title']}")
 
-@bot.on_message(filters.command("pause") & filters.group)
+@bot.on_message(filters.command("pause") & CHAT_FILTER)
 async def pause_h(_, m: Message):
     try:
         await call_py.pause_stream(m.chat.id)
@@ -121,7 +122,7 @@ async def pause_h(_, m: Message):
     except Exception as e:
         await m.reply_text(f"Error: {e}")
 
-@bot.on_message(filters.command("resume") & filters.group)
+@bot.on_message(filters.command("resume") & CHAT_FILTER)
 async def resume_h(_, m: Message):
     try:
         await call_py.resume_stream(m.chat.id)
@@ -129,14 +130,14 @@ async def resume_h(_, m: Message):
     except Exception as e:
         await m.reply_text(f"Error: {e}")
 
-@bot.on_message(filters.command("skip") & filters.group)
+@bot.on_message(filters.command("skip") & CHAT_FILTER)
 async def skip_h(_, m: Message):
     if queues[m.chat.id]:
         queues[m.chat.id].pop(0)
         await m.reply_text("Skipped.")
         await play_next(m.chat.id)
 
-@bot.on_message(filters.command("stop") & filters.group)
+@bot.on_message(filters.command("stop") & CHAT_FILTER)
 async def stop_h(_, m: Message):
     queues[m.chat.id].clear()
     try:
@@ -145,7 +146,7 @@ async def stop_h(_, m: Message):
         pass
     await m.reply_text("Stopped.")
 
-@bot.on_message(filters.command("queue") & filters.group)
+@bot.on_message(filters.command("queue") & CHAT_FILTER)
 async def queue_h(_, m: Message):
     q = queues[m.chat.id]
     await m.reply_text("Queue:\n" + "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(q)) if q else "Queue is empty.")
