@@ -1,6 +1,8 @@
-    import os
+import os
 import asyncio
+import urllib.parse
 from collections import defaultdict
+import aiohttp
 import yt_dlp
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message
@@ -17,32 +19,40 @@ assistant = Client("assistant", api_id=API_ID, api_hash=API_HASH, session_string
 call_py = PyTgCalls(assistant)
 queues = defaultdict(list)
 
-YDL_OPTS = {
-    "format": "bestaudio/best",
-    "noplaylist": True,
-    "quiet": True,
-    "extractor_args": {"youtube": {"player_client": ["android", "ios", "web"]}},
-}
+async def get_audio_info(query: str):
+    if not query.startswith("http"):
+        q = urllib.parse.quote(query)
+        apis = [
+            f"https://saavn.dev/api/search/songs?query={q}",
+            f"https://jiosaavn-api-privatecvc2.vercel.app/search/songs?query={q}",
+        ]
+        async with aiohttp.ClientSession() as session:
+            for api_url in apis:
+                try:
+                    async with session.get(api_url, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            results = data.get("data", {}).get("results", [])
+                            if results:
+                                song = results[0]
+                                dl_urls = song.get("downloadUrl", [])
+                                stream_url = dl_urls[-1].get("url") or dl_urls[-1].get("link")
+                                title = song.get("name", query)
+                                if stream_url:
+                                    return {"title": title, "url": stream_url, "direct": True}
+                except Exception:
+                    continue
 
-def get_audio_info(query: str):
-    sources = [f"ytsearch1:{query}", f"scsearch1:{query}"] if not query.startswith("http") else [query]
-    last_err = None
-    for src in sources:
-        try:
-            with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-                info = ydl.extract_info(src, download=False)
-                if "entries" in info:
-                    if not info["entries"]:
-                        continue
-                    info = info["entries"][0]
-                return {
-                    "title": info.get("title", "Unknown"),
-                    "url": info["url"],
-                    "webpage_url": info.get("webpage_url", src),
-                }
-        except Exception as e:
-            last_err = e
-    raise last_err
+    # Fallback to SoundCloud / Direct URL via yt-dlp
+    src = query if query.startswith("http") else f"scsearch1:{query}"
+    ydl_opts = {"format": "bestaudio/best", "noplaylist": True, "quiet": True}
+    def extract():
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(src, download=False)
+            if "entries" in info:
+                info = info["entries"][0]
+            return {"title": info.get("title", "Unknown"), "url": info["url"], "direct": False}
+    return await asyncio.to_thread(extract)
 
 async def play_next(chat_id: int):
     if not queues[chat_id]:
@@ -71,33 +81,29 @@ async def play_handler(_, m: Message):
     query = m.text.split(None, 1)[1]
     status = await m.reply_text(f"Searching: {query}...")
     try:
-        track = await asyncio.to_thread(get_audio_info, query)
+        track = await get_audio_info(query)
     except Exception as e:
         return await status.edit_text(f"Search failed: {e}")
 
     if m.chat.type.name == "PRIVATE":
         await status.edit_text(f"Downloading: {track['title']}...")
-        ydl_dl = {
-            "format": "bestaudio[ext=m4a]/bestaudio/best",
-            "outtmpl": "/tmp/%(id)s.%(ext)s",
-            "quiet": True,
-            "noplaylist": True,
-            "extractor_args": {"youtube": {"player_client": ["android", "ios", "web"]}},
-        }
-        def dl():
-            with yt_dlp.YoutubeDL(ydl_dl) as ydl:
-                info = ydl.extract_info(track["webpage_url"], download=True)
-                if "entries" in info:
-                    info = info["entries"][0]
-                return ydl.prepare_filename(info), info.get("title", "Audio")
+        fpath = f"/tmp/{os.urandom(4).hex()}.m4a"
         try:
-            fpath, title = await asyncio.to_thread(dl)
-            await m.reply_audio(fpath, title=title)
+            if track.get("direct"):
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(track["url"]) as resp:
+                        with open(fpath, "wb") as f:
+                            f.write(await resp.read())
+            else:
+                ydl_dl = {"format": "bestaudio/best", "outtmpl": fpath, "quiet": True}
+                await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_dl).download([track["url"]]))
+            await m.reply_audio(fpath, title=track["title"])
             await status.delete()
-            if os.path.exists(fpath):
-                os.remove(fpath)
         except Exception as e:
             await status.edit_text(f"Download failed: {e}")
+        finally:
+            if os.path.exists(fpath):
+                os.remove(fpath)
         return
 
     queues[m.chat.id].append(track)
