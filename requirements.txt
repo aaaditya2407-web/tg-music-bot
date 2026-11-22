@@ -4,4 +4,3 @@ py-tgcalls
 yt-dlp
 aiohttp
 python-dotenv
-ffmpeg-python

@@ -1,232 +1,165 @@
 import os
 import asyncio
-import logging
-from pathlib import Path
-from typing import Dict, List
-
-from pyrogram import Client, filters
-from pyrogram.types import (Message, InlineKeyboardMarkup,
-                            InlineKeyboardButton, CallbackQuery)
-from pyrogram.errors import ChatAdminRequired, UserNotParticipant
-
-from pytgcalls import PyTgCalls, idle
-from pytgcalls.types import AudioPiped
-from pytgcalls.exceptions import NoActiveGroupCall
-
+from collections import defaultdict
 import yt_dlp
-import ffmpeg
-from dotenv import load_dotenv
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from pytgcalls import PyTgCalls
+from pytgcalls.types import MediaStream
 
-# ------------------------------------------------------------
-# Load environment variables
-# ------------------------------------------------------------
-load_dotenv()
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-STRING_SESSION = os.getenv("STRING_SESSION")  # optional user session for voice chat control
+API_ID = int(os.environ["API_ID"])
+API_HASH = os.environ["API_HASH"]
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+STRING_SESSION = os.environ["STRING_SESSION"]
 
-# ------------------------------------------------------------
-# Basic logging configuration
-# ------------------------------------------------------------
-logging.basicConfig(
-    format="[%(asctime)s] %(levelname)s - %(name)s - %(message)s",
-    level=logging.INFO,
-)
-log = logging.getLogger(__name__)
+bot = Client("music_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+assistant = Client("assistant", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
+call_py = PyTgCalls(assistant)
 
-# ------------------------------------------------------------
-# Pyrogram client (bot) and PyTgCalls instance
-# ------------------------------------------------------------
-app = Client("tg_music_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-# If you provide a user String Session you can also control voice chat as a user.
-# For simplicity we only use the bot account here.
+queues = defaultdict(list)
 
-tgcalls = PyTgCalls(app)
-
-# ------------------------------------------------------------
-# Simple in‑memory queue structure
-# ------------------------------------------------------------
-queues: Dict[int, List[Dict]] = {}
-
-# ------------------------------------------------------------
-# Helper functions
-# ------------------------------------------------------------
-YTDL_OPTS = {
+YDL_OPTS = {
     "format": "bestaudio/best",
+    "noplaylist": True,
     "quiet": True,
-    "no_warnings": True,
-    "extract_flat": "in_playlist",
-    "default_search": "ytsearch",
-    "geo_bypass": True,
-    "nocheckcertificate": True,
-    "outtmpl": "downloads/%(id)s.%(ext)s",
+    "default_search": "ytsearch1",
+    "extract_flat": False,
 }
 
-ytdl = yt_dlp.YoutubeDL(YTDL_OPTS)
-
-def download_audio(url: str) -> Path:
-    """Download a YouTube/audio URL and return the path to the converted raw PCM file.
-    The function returns a Path pointing to a .raw file suitable for AudioPiped.
-    """
-    info = ytdl.extract_info(url, download=False)
-    # yt_dlp may return a playlist dict; we only need the first entry.
-    if "entries" in info:
-        info = info["entries"][0]
-    title = info.get("title", "unknown")
-    video_id = info.get("id")
-    download_path = Path(f"downloads/{video_id}.webm")
-    # Download the audio file
-    ytdl.process_info(info)
-    # Convert to raw PCM (s16le, 48kHz, stereo) for py‑tgcalls
-    raw_path = Path(f"downloads/{video_id}.raw")
-    if not raw_path.is_file():
-        (
-            ffmpeg
-            .input(str(download_path))
-            .output(str(raw_path), format="s16le", acodec="pcm_s16le", ac=2, ar="48000")
-            .overwrite_output()
-            .run(quiet=True)
-        )
-    return raw_path
-
-def get_queue(chat_id: int) -> List[Dict]:
-    return queues.setdefault(chat_id, [])
-
-async def start_call(chat_id: int, audio_path: Path):
-    try:
-        await tgcalls.join_group_call(chat_id, AudioPiped(str(audio_path)))
-    except NoActiveGroupCall:
-        # No active group call – try to start one via the bot admin rights.
-        await app.send_message(chat_id, "❗️ No active voice chat. Please start a voice chat first.")
-    except Exception as e:
-        log.exception(e)
-        await app.send_message(chat_id, f"❗️ Failed to join voice chat: {e}")
+def get_audio_info(query: str):
+    with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
+        info = ydl.extract_info(query, download=False)
+        if "entries" in info:
+            info = info["entries"][0]
+        return {
+            "title": info.get("title", "Unknown Track"),
+            "url": info["url"],
+            "webpage_url": info.get("webpage_url", ""),
+            "duration": info.get("duration", 0),
+        }
 
 async def play_next(chat_id: int):
-    q = get_queue(chat_id)
-    if not q:
-        await tgcalls.leave_group_call(chat_id)
+    if not queues[chat_id]:
+        try:
+            await call_py.leave_call(chat_id)
+        except Exception:
+            pass
         return
-    track = q.pop(0)
-    await start_call(chat_id, track["path"])
-    # Show now‑playing message with inline controls
-    await app.send_photo(
-        chat_id,
-        photo=track["thumb"],
-        caption=f"▶️ **Now playing:** [{track['title']}]({track['url']})",
-        reply_markup=control_markup(chat_id),
-    )
-
-def control_markup(chat_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("⏸ Pause", callback_data=f"pause|{chat_id}"),
-                InlineKeyboardButton("▶️ Resume", callback_data=f"resume|{chat_id}"),
-            ],
-            [
-                InlineKeyboardButton("⏭ Skip", callback_data=f"skip|{chat_id}"),
-                InlineKeyboardButton("⏹ Stop", callback_data=f"stop|{chat_id}"),
-            ],
-        ]
-    )
-
-# ------------------------------------------------------------
-# Command handlers
-# ------------------------------------------------------------
-@app.on_message(filters.command("play") & filters.group)
-async def cmd_play(_: Client, message: Message):
-    if not message.reply_to_message or not message.reply_to_message.text:
-        await message.reply("⚠️ Reply to a YouTube/URL or type `/play <url>`.")
-        return
-    query = message.text.split(maxsplit=1)[1] if len(message.command) > 1 else message.reply_to_message.text
-    await message.reply("🔎 Searching…")
+    track = queues[chat_id][0]
     try:
-        path = download_audio(query)
-        info = ytdl.extract_info(query, download=False)
-        title = info.get("title", "unknown")
-        thumb = info.get("thumbnail", "https://i.imgur.com/3M1u4b8.png")
-        url = info.get("webpage_url", query)
-        # Append to queue
-        get_queue(message.chat.id).append({"title": title, "url": url, "thumb": thumb, "path": path})
-        if not tgcalls.active_calls.get(message.chat.id):
-            await play_next(message.chat.id)
-        else:
-            await message.reply(f"✅ **Queued:** [{title}]({url})", disable_web_page_preview=True)
+        await call_py.play(chat_id, MediaStream(track["url"], video_flags=MediaStream.Flags.IGNORE))
+        await bot.send_message(chat_id, f"Now Playing: {track['title']}")
     except Exception as e:
-        log.exception(e)
-        await message.reply(f"❌ Failed to process request: {e}")
-
-@app.on_message(filters.command(["vplay", "playvc"]) & filters.group)
-async def cmd_vplay(_: Client, message: Message):
-    # Alias for /play – kept for compatibility with existing bots
-    await cmd_play(_, message)
-
-@app.on_callback_query(filters.regex(r"^(pause|resume|skip|stop)\|"))
-async def cb_controls(_: Client, call: CallbackQuery):
-    action, chat_id = call.data.split("|")
-    chat_id = int(chat_id)
-    if action == "pause":
-        try:
-            await tgcalls.pause_stream(chat_id)
-            await call.answer("⏸ Paused", show_alert=False)
-        except Exception as e:
-            await call.answer(str(e), show_alert=True)
-    elif action == "resume":
-        try:
-            await tgcalls.resume_stream(chat_id)
-            await call.answer("▶️ Resumed", show_alert=False)
-        except Exception as e:
-            await call.answer(str(e), show_alert=True)
-    elif action == "skip":
-        await call.answer("⏭ Skipping…", show_alert=False)
+        await bot.send_message(chat_id, f"Stream error: {e}")
+        queues[chat_id].pop(0)
         await play_next(chat_id)
-    elif action == "stop":
-        await tgcalls.leave_group_call(chat_id)
-        get_queue(chat_id).clear()
-        await call.message.delete()
-        await call.answer("⏹ Stopped", show_alert=False)
 
-@app.on_message(filters.command("queue") & filters.group)
-async def cmd_queue(_: Client, message: Message):
-    q = get_queue(message.chat.id)
-    if not q:
-        await message.reply("📭 Queue is empty.")
-        return
-    txt = "**Current Queue:**\n"
-    for i, track in enumerate(q, start=1):
-        txt += f"{i}. [{track['title']}]({track['url']})\n"
-    await message.reply(txt, disable_web_page_preview=True)
-
-# ------------------------------------------------------------
-# Startup & shutdown
-# ------------------------------------------------------------
-@app.on_message(filters.command("start") & filters.private)
-async def cmd_start(_: Client, message: Message):
-    await message.reply(
-        "👋 Hi! Add me to a group, give admin rights (manage voice chats) and use /play <url> to start streaming music.",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("GitHub", url="https://github.com/aaaditya2407-web/tg-music-bot")]
-        ]),
+@bot.on_message(filters.command(["start", "help"]))
+async def start_handler(_, m: Message):
+    await m.reply_text(
+        "Music Bot is Online!\n\n"
+        "Commands:\n"
+        "/play <song name or link> - Play in Group Voice Chat or get audio in PM\n"
+        "/pause - Pause playback\n"
+        "/resume - Resume playback\n"
+        "/skip - Skip current song\n"
+        "/stop - Stop and leave Voice Chat\n"
+        "/queue - Show current queue"
     )
 
-@app.on_message(filters.command("stop") & filters.group)
-async def cmd_stop(_: Client, message: Message):
-    await tgcalls.leave_group_call(message.chat.id)
-    get_queue(message.chat.id).clear()
-    await message.reply("⏹ Stopped playback and cleared the queue.")
+@bot.on_message(filters.command("play"))
+async def play_handler(_, m: Message):
+    if len(m.command) < 2:
+        return await m.reply_text("Usage: /play <song name or YouTube URL>")
+    query = m.text.split(None, 1)[1]
+    status = await m.reply_text(f"Searching: {query}...")
+    try:
+        track = await asyncio.to_thread(get_audio_info, query)
+    except Exception as e:
+        return await status.edit_text(f"Search failed: {e}")
 
-# ------------------------------------------------------------
-# Run the bot
-# ------------------------------------------------------------
+    if m.chat.type.name == "PRIVATE":
+        await status.edit_text(f"Found: {track['title']}\nSending audio...")
+        ydl_dl = {"format": "bestaudio[ext=m4a]/bestaudio", "outtmpl": "/tmp/%(id)s.%(ext)s", "quiet": True, "noplaylist": True}
+        def download():
+            with yt_dlp.YoutubeDL(ydl_dl) as ydl:
+                info = ydl.extract_info(track["webpage_url"] or query, download=True)
+                if "entries" in info:
+                    info = info["entries"][0]
+                return ydl.prepare_filename(info), info.get("title", "Audio")
+        try:
+            fpath, title = await asyncio.to_thread(download)
+            await m.reply_audio(fpath, title=title)
+            await status.delete()
+            if os.path.exists(fpath):
+                os.remove(fpath)
+        except Exception as e:
+            await status.edit_text(f"Download failed: {e}")
+        return
+
+    chat_id = m.chat.id
+    queues[chat_id].append(track)
+    if len(queues[chat_id]) == 1:
+        await status.delete()
+        await play_next(chat_id)
+    else:
+        await status.edit_text(f"Queued (#{len(queues[chat_id])}): {track['title']}")
+
+@bot.on_message(filters.command("pause") & filters.group)
+async def pause_handler(_, m: Message):
+    try:
+        await call_py.pause_stream(m.chat.id)
+        await m.reply_text("Paused.")
+    except Exception as e:
+        await m.reply_text(f"Error: {e}")
+
+@bot.on_message(filters.command("resume") & filters.group)
+async def resume_handler(_, m: Message):
+    try:
+        await call_py.resume_stream(m.chat.id)
+        await m.reply_text("Resumed.")
+    except Exception as e:
+        await m.reply_text(f"Error: {e}")
+
+@bot.on_message(filters.command("skip") & filters.group)
+async def skip_handler(_, m: Message):
+    if queues[m.chat.id]:
+        queues[m.chat.id].pop(0)
+        await m.reply_text("Skipped.")
+        await play_next(m.chat.id)
+    else:
+        await m.reply_text("Queue is empty.")
+
+@bot.on_message(filters.command("stop") & filters.group)
+async def stop_handler(_, m: Message):
+    queues[m.chat.id].clear()
+    try:
+        await call_py.leave_call(m.chat.id)
+    except Exception:
+        pass
+    await m.reply_text("Stopped and left Voice Chat.")
+
+@bot.on_message(filters.command("queue") & filters.group)
+async def queue_handler(_, m: Message):
+    q = queues[m.chat.id]
+    if not q:
+        return await m.reply_text("Queue is empty.")
+    text = "\n".join(f"{i+1}. {t['title']}" for i, t in enumerate(q))
+    await m.reply_text(f"Current Queue:\n{text}")
+
+@call_py.on_update()
+async def stream_end_handler(_, update):
+    if type(update).__name__ == "StreamAudioEnded":
+        chat_id = update.chat_id
+        if queues[chat_id]:
+            queues[chat_id].pop(0)
+        await play_next(chat_id)
+
 async def main():
-    await app.start()
-    await tgcalls.start()
-    log.info("Bot is ready.")
-    await idle()
-    await tgcalls.stop()
-    await app.stop()
+    await bot.start()
+    await call_py.start()
+    print("Music Bot is ready and running!")
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
