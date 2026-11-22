@@ -1,11 +1,4 @@
 [[services]]
-# Railway deploy configuration
-# Use the Dockerfile in the repo
-name = "tg-music-bot"
-
-[services.build]
-# Railway builds the Dockerfile automatically
-
-[services.env]
-# Add your environment variables in the Railway UI:
-# API_ID, API_HASH, BOT_TOKEN, STRING_SESSION
+  name = "tg-music-bot"
+  build = "Dockerfile"
+  start = "python bot.py"
