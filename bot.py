@@ -99,6 +99,7 @@ async def play_handler(_, m: Message):
                 ydl_dl = {"format": "bestaudio/best", "outtmpl": fpath, "quiet": True}
                 await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_dl).download([track["url"]]))
             await m.reply_audio(fpath, title=title := track["title"])
+            
             await status.delete()
         except Exception as e:
             await status.edit_text(f"Download failed: {e}")
