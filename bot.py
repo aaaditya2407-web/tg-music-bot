@@ -47,12 +47,14 @@ async def get_audio_info(query: str):
 
     src = query if query.startswith("http") else f"scsearch1:{query}"
     ydl_opts = {"format": "bestaudio/best", "noplaylist": True, "quiet": True}
+
     def extract():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(src, download=False)
             if "entries" in info:
                 info = info["entries"][0]
             return {"title": info.get("title", "Unknown"), "url": info["url"], "direct": False}
+
     return await asyncio.to_thread(extract)
 
 async def play_next(chat_id: int):
@@ -98,8 +100,7 @@ async def play_handler(_, m: Message):
             else:
                 ydl_dl = {"format": "bestaudio/best", "outtmpl": fpath, "quiet": True}
                 await asyncio.to_thread(lambda: yt_dlp.YoutubeDL(ydl_dl).download([track["url"]]))
-            await m.reply_audio(fpath, title=title := track["title"])
-            
+            await m.reply_audio(fpath, title=track["title"])
             await status.delete()
         except Exception as e:
             await status.edit_text(f"Download failed: {e}")
