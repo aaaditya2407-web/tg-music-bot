@@ -1,4 +1,5 @@
-import os, asyncio
+import os
+import asyncio
 from collections import defaultdict
 import yt_dlp
 from pyrogram import Client, filters
@@ -21,13 +22,20 @@ YDL_OPTS = {"format": "bestaudio/best", "noplaylist": True, "quiet": True, "defa
 def get_audio_info(query: str):
     with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
         info = ydl.extract_info(query, download=False)
-        if "entries" in info: info = info["entries"][0]
-        return {"title": info.get("title", "Unknown"), "url": info["url"], "webpage_url": info.get("webpage_url", "")}
+        if "entries" in info:
+            info = info["entries"][0]
+        return {
+            "title": info.get("title", "Unknown"),
+            "url": info["url"],
+            "webpage_url": info.get("webpage_url", ""),
+        }
 
 async def play_next(chat_id: int):
     if not queues[chat_id]:
-        try: await call_py.leave_call(chat_id)
-        except Exception: pass
+        try:
+            await call_py.leave_call(chat_id)
+        except Exception:
+            pass
         return
     track = queues[chat_id][0]
     try:
@@ -44,51 +52,71 @@ async def start_handler(_, m: Message):
 
 @bot.on_message(filters.command("play"))
 async def play_handler(_, m: Message):
-    if len(m.command) < 2: return await m.reply_text("Usage: /play <song name>")
+    if len(m.command) < 2:
+        return await m.reply_text("Usage: /play <song name>")
     query = m.text.split(None, 1)[1]
     status = await m.reply_text(f"Searching: {query}...")
-    try: track = await asyncio.to_thread(get_audio_info, query)
-    except Exception as e: return await status.edit_text(f"Search failed: {e}")
+    try:
+        track = await asyncio.to_thread(get_audio_info, query)
+    except Exception as e:
+        return await status.edit_text(f"Search failed: {e}")
+
     if m.chat.type.name == "PRIVATE":
         await status.edit_text(f"Downloading: {track['title']}...")
         ydl_dl = {"format": "bestaudio[ext=m4a]/bestaudio", "outtmpl": "/tmp/%(id)s.%(ext)s", "quiet": True, "noplaylist": True}
         def dl():
             with yt_dlp.YoutubeDL(ydl_dl) as ydl:
                 info = ydl.extract_info(track["webpage_url"] or query, download=True)
-                if "entries" in info: info = info["entries"][0]
+                if "entries" in info:
+                    info = info["entries"][0]
                 return ydl.prepare_filename(info), info.get("title", "Audio")
         try:
             fpath, title = await asyncio.to_thread(dl)
             await m.reply_audio(fpath, title=title)
             await status.delete()
-            if os.path.exists(fpath): os.remove(fpath)
-        except Exception as e: await status.edit_text(f"Download failed: {e}")
+            if os.path.exists(fpath):
+                os.remove(fpath)
+        except Exception as e:
+            await status.edit_text(f"Download failed: {e}")
         return
+
     queues[m.chat.id].append(track)
     if len(queues[m.chat.id]) == 1:
         await status.delete()
         await play_next(m.chat.id)
-    else: await status.edit_text(f"Queued (#{len(queues[m.chat.id])}): {track['title']}")
+    else:
+        await status.edit_text(f"Queued (#{len(queues[m.chat.id])}): {track['title']}")
 
 @bot.on_message(filters.command("pause") & filters.group)
 async def pause_h(_, m: Message):
-    try: await call_py.pause_stream(m.chat.id); await m.reply_text("Paused.")
-    except Exception as e: await m.reply_text(f"Error: {e}")
+    try:
+        await call_py.pause_stream(m.chat.id)
+        await m.reply_text("Paused.")
+    except Exception as e:
+        await m.reply_text(f"Error: {e}")
 
 @bot.on_message(filters.command("resume") & filters.group)
 async def resume_h(_, m: Message):
-    try: await call_py.resume_stream(m.chat.id); await m.reply_text("Resumed.")
-    except Exception as e: await m.reply_text(f"Error: {e}")
+    try:
+        await call_py.resume_stream(m.chat.id)
+        await m.reply_text("Resumed.")
+    except Exception as e:
+        await m.reply_text(f"Error: {e}")
 
 @bot.on_message(filters.command("skip") & filters.group)
 async def skip_h(_, m: Message):
-    if queues[m.chat.id]: queues[m.chat.id].pop(0); await m.reply_text("Skipped."); await play_next(m.chat.id)
+    if queues[m.chat.id]:
+        queues[m.chat.id].pop(0)
+        await m.reply_text("Skipped.")
+        await play_next(m.chat.id)
 
 @bot.on_message(filters.command("stop") & filters.group)
 async def stop_h(_, m: Message):
     queues[m.chat.id].clear()
-    try: await call_py.leave_call(m.chat.id)
-    except Exception: pass
+    try:
+        await call_py.leave_call(m.chat.id)
+    except Exception:
+        pass
     await m.reply_text("Stopped.")
 
 @bot.on_message(filters.command("queue") & filters.group)
@@ -99,12 +127,16 @@ async def queue_h(_, m: Message):
 @call_py.on_update()
 async def end_h(_, update):
     if type(update).__name__ == "StreamAudioEnded":
-        if queues[update.chat_id]: queues[update.chat_id].pop(0)
+        if queues[update.chat_id]:
+            queues[update.chat_id].pop(0)
         await play_next(update.chat_id)
 
 async def main():
-    await bot.start(); await call_py.start()
+    await bot.start()
+    await call_py.start()
     print("Music Bot is ready!")
     await asyncio.Event().wait()
 
-if __name__ == "__main__": asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
+            
