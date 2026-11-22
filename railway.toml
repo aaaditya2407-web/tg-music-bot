@@ -1,4 +1,6 @@
 [[services]]
   name = "tg-music-bot"
-  build = "Dockerfile"
-  start = "python bot.py"
+  type = "docker"
+  dockerfile = "Dockerfile"
+  internal_port = 8080
+  start_command = "python bot.py"
