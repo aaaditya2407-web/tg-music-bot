@@ -18,6 +18,7 @@ bot = Client("music_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN,
 assistant = Client("assistant", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION, in_memory=True)
 call_py = PyTgCalls(assistant)
 queues = defaultdict(list)
+vc_ready = False
 
 CHAT_FILTER = filters.group | filters.channel
 
@@ -75,7 +76,11 @@ async def play_next(chat_id: int):
 
 @bot.on_message(filters.command(["start", "help"]))
 async def start_handler(_, m: Message):
-    await m.reply_text("Music Bot Online!\nCommands: /play, /pause, /resume, /skip, /stop, /queue")
+    status = "Ready" if vc_ready else "Offline (Check STRING_SESSION in Railway logs)"
+    await m.reply_text(
+        f"Music Bot Online!\nVoice Chat Engine: {status}\n\n"
+        "Commands: /play, /pause, /resume, /skip, /stop, /queue"
+    )
 
 @bot.on_message(filters.command("play"))
 async def play_handler(_, m: Message):
@@ -108,6 +113,9 @@ async def play_handler(_, m: Message):
             if os.path.exists(fpath):
                 os.remove(fpath)
         return
+
+    if not vc_ready:
+        return await status.edit_text("Voice Chat Assistant is offline. Check Railway logs for STRING_SESSION error.")
 
     queues[m.chat.id].append(track)
     if len(queues[m.chat.id]) == 1:
@@ -161,11 +169,16 @@ async def end_h(_, update):
         await play_next(update.chat_id)
 
 async def main():
-    await call_py.start()
-    print("Voice Chat Engine Ready!", flush=True)
+    global vc_ready
     await bot.start()
     me = await bot.get_me()
     print(f"BOT USERNAME: @{me.username} is listening!", flush=True)
+    try:
+        await call_py.start()
+        vc_ready = True
+        print("Voice Chat Engine Ready!", flush=True)
+    except Exception as e:
+        print(f"Assistant/VC Error: {e}", flush=True)
     await idle()
 
 if __name__ == "__main__":
